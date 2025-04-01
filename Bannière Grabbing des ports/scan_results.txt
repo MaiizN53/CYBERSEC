@@ -1,0 +1,2 @@
+[+] Port 903 ouvert – Service détecté : 220 VMware Authentication Daemon Version 1.10: SSL Required, ServerDaemonProtocol:SOAP, MKSDisplayProtocol:VNC , , NFCSSL supported/t,
+[+] Port 913 ouvert – Service détecté : 220 VMware Authentication Daemon Version 1.0, ServerDaemonProtocol:SOAP, MKSDisplayProtocol:VNC , , ,
