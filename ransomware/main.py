@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # ransomware_total.py - Simulation pédagogique de ransomware Linux
 
-import os
-import sys
 import logging
-from cryptography.fernet import Fernet
-import paramiko
+import os
 import socket
-import subprocess
+import sys
 from datetime import datetime
+
+from cryptography.fernet import Fernet
 
 # Configuration - MODIFIÉ pour environnement de test
 LOG_FILE = "/tmp/ransomware_sim.log"  # Changé vers /tmp pour éviter /var/log
