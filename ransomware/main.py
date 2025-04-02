@@ -13,7 +13,7 @@ SFTP_SERVER = "192.168.239.130"
 SFTP_USER = "test"
 SFTP_PASS = "test"
 SFTP_PORT = 22
-SFTP_REMOTE_PATH = "."
+SFTP_REMOTE_PATH = "/upload"
 
 # Configuration locale
 LOG_FILE = "/tmp/ransomware_full_system.log"
