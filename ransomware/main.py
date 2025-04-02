@@ -214,4 +214,12 @@ Fichiers chiffrés: {count}
     logging.critical("=== CHIFFREMENT TERMINÉ ===")
 
     if __name__ == "__main__":
+    # Activation du debug paramiko
+        paramiko.util.log_to_file('/tmp/paramiko_debug.log')
+
+    # Exécution
+    try:
         main()
+    except Exception as e:
+        logging.error(f"ERREUR FATALE: {str(e)}", exc_info=True)
+        raise
